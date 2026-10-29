@@ -46,6 +46,8 @@ SDK, Spectre libraries and vcpkg integration installed:
 Import-Module .\contrib\win32\openssh\OpenSSHBuildHelper.psm1 -Force
 $env:_CL_ = '/Z7'
 $env:_LINK_ = '/DEBUG:NONE'
+$env:VCPKG_KEEP_ENV_VARS = '_CL_;_LINK_'
+$env:VCPKG_BINARY_SOURCES = 'clear'
 Start-OpenSSHBuild -Configuration Release -NativeHostArch x64 -Verbose
 Start-OpenSSHPackage -Configuration Release -NativeHostArch x64 -SkipSymbols
 ```
@@ -189,3 +191,13 @@ The first runner-only run (`1adf74d`) found Visual Studio 2026 under its version
 through to a missing VS 2015 environment variable. VC target discovery now reads
 the installed versioned targets directory rather than inferring it from the
 installation path. The project's v143 toolset requirement is preserved.
+
+The first complete compile (`c166e8c`, run `40904621731`) passed, but the package
+check correctly rejected a CodeView reference in `libcrypto.dll`. vcpkg clears
+most inherited environment variables, so its LibreSSL build had not received
+the no-PDB options. The workflow explicitly preserves `_CL_`/`_LINK_` through
+`VCPKG_KEEP_ENV_VARS` and disables dependency binary caching for this build.
+Those overrides are not represented in the dependency ABI; source builds avoid
+reusing a cached dependency with debug records. Use a fresh checkout, or remove
+only that checkout's existing `vcpkg_installed` dependencies before rebuilding
+with these options.

@@ -52,6 +52,10 @@ jobs:
           # Append tool options after project flags, including vcpkg child builds.
           $env:_CL_ = '/Z7'
           $env:_LINK_ = '/DEBUG:NONE'
+          # vcpkg sanitizes child environments; preserve these options explicitly.
+          $env:VCPKG_KEEP_ENV_VARS = '_CL_;_LINK_'
+          # These overrides are untracked by the dependency ABI; rebuild from source.
+          $env:VCPKG_BINARY_SOURCES = 'clear'
           & "$env:VCPKG_INSTALLATION_ROOT\vcpkg.exe" integrate install
           if ($LASTEXITCODE) { throw 'vcpkg integration failed' }
           Import-Module .\contrib\win32\openssh\OpenSSHBuildHelper.psm1 -Force
