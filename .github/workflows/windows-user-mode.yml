@@ -20,7 +20,7 @@ jobs:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
       - name: Parse user-mode scripts
         run: |
-          foreach ($name in 'Start-UserSshd.ps1', 'Test-UserSshd.ps1') {
+          foreach ($name in 'Start-UserSshd.ps1', 'Test-UserSshd.ps1', 'OpenSSHBuildHelper.psm1') {
             $path = Join-Path 'contrib\win32\openssh' $name
             $tokens = $null; $errors = $null
             $null = [Management.Automation.Language.Parser]::ParseFile(
@@ -30,16 +30,21 @@ jobs:
       - name: Build native x64 Release package
         run: |
           $ErrorActionPreference = 'Stop'
+          # Append tool options after project flags, including vcpkg child builds.
+          $env:_CL_ = '/Z7'
+          $env:_LINK_ = '/DEBUG:NONE'
           & "$env:VCPKG_INSTALLATION_ROOT\vcpkg.exe" integrate install
           if ($LASTEXITCODE) { throw 'vcpkg integration failed' }
           Import-Module .\contrib\win32\openssh\OpenSSHBuildHelper.psm1 -Force
           Start-OpenSSHBuild -Configuration Release -NativeHostArch x64 -Verbose
           $package = Join-Path $env:RUNNER_TEMP 'OpenSSH-Win64-UserMode'
-          Start-OpenSSHPackage -Configuration Release -NativeHostArch x64 -DestinationPath $package
+          Start-OpenSSHPackage -Configuration Release -NativeHostArch x64 -DestinationPath $package -SkipSymbols
           Copy-Item contrib\win32\openssh\Start-UserSshd.ps1 $package
           Copy-Item contrib\win32\openssh\Test-UserSshd.ps1 $package
           Copy-Item contrib\win32\openssh\README-user-mode.md $package
           $env:GITHUB_SHA | Set-Content (Join-Path $package 'SOURCE_COMMIT.txt')
+          python regress/unittests/win32compat/check_no_pdb.py $package
+          if ($LASTEXITCODE -ne 0) { throw 'The package still contains PDB files or CodeView debug records' }
       - name: Test as an actual non-administrator
         run: |
           $ErrorActionPreference = 'Stop'

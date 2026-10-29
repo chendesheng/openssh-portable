@@ -42,8 +42,10 @@ SDK, Spectre libraries and vcpkg integration installed:
 
 ```powershell
 Import-Module .\contrib\win32\openssh\OpenSSHBuildHelper.psm1 -Force
+$env:_CL_ = '/Z7'
+$env:_LINK_ = '/DEBUG:NONE'
 Start-OpenSSHBuild -Configuration Release -NativeHostArch x64 -Verbose
-Start-OpenSSHPackage -Configuration Release -NativeHostArch x64
+Start-OpenSSHPackage -Configuration Release -NativeHostArch x64 -SkipSymbols
 ```
 
 The SDK/build dependencies may require administrator installation on the build
@@ -169,7 +171,19 @@ phone/Mac clients have not been tested with these experimental binaries.
 
 The current workflow uses `windows-latest` to compare against the successfully
 tested `windows-2022` artifact recorded above. The server source, Release/x64
-configuration, packaging and standard-user integration tests are unchanged.
+configuration and standard-user integration tests retain the same settings.
+The later user-requested symbol removal is an additional change: `_CL_=/Z7`
+keeps compiler debug records in temporary object files rather than compiler
+PDBs, while `_LINK_=/DEBUG:NONE` disables linker PDB generation. Packaging uses
+`-SkipSymbols` and checks every shipped EXE/DLL for CodeView/PDB references.
+The earlier ZIP did contain 15 PDBs through the helper's symbol-copy path.
+Neither the PDBs nor their embedded references are retained in this new output.
 Record the resolved runner image, CI result and win77 version-check result
 separately; a runner change alone does not establish the cause of an application
 control rejection. Keep the earlier artifact available for comparison.
+
+The first runner-only run (`1adf74d`) found Visual Studio 2026 under its versioned
+`18` directory. The old bootstrap recognized year-named paths only and fell
+through to a missing VS 2015 environment variable. VC target discovery now reads
+the installed versioned targets directory rather than inferring it from the
+installation path. The project's v143 toolset requirement is preserved.

@@ -196,18 +196,22 @@ function Start-OpenSSHBootstrap
     else {
         $MSBuildPath = Get-VS2015BuildToolPath
     }
-    if ($MSBuildPath | Select-String "2022")
-    {
-        $env:vctargetspath = Join-Path $VisualStudioPath "MSBuild\Microsoft\VC\v170\"
-        if ($null -eq $env:VS170COMNTOOLS)
-        {
-            $env:VS170COMNTOOLS = Get-BuildToolPath -VSInstallPath $VisualStudioPath -version "2022"
+    # Modern VS installations use versioned VC targets (v170, v180, ...).
+    # Detect the installed layout instead of treating an unfamiliar year as VS 2015.
+    $modernVCTargets = @()
+    if ($VisualStudioPath) {
+        $vcTargetsRoot = Join-Path $VisualStudioPath 'MSBuild\Microsoft\VC'
+        if (Test-Path -LiteralPath $vcTargetsRoot) {
+            $modernVCTargets = @(Get-ChildItem -LiteralPath $vcTargetsRoot -Directory |
+                Where-Object { $_.Name -match '^v[0-9]+$' -and
+                    (Test-Path -LiteralPath (Join-Path $_.FullName 'Microsoft.Cpp.Default.props')) } |
+                Sort-Object { [int]$_.Name.Substring(1) } -Descending)
         }
-        elseif (-not (Test-Path $env:VS170COMNTOOLS))
-        {
-            Write-BuildMsg -AsError -ErrorAction Stop -Message "$env:VS170COMNTOOLS build tools path is invalid"
-        }
-        $VSBuildToolsPath = Get-Item(Join-Path $VisualStudioPath 'vc/auxiliary/build')
+    }
+    if ($modernVCTargets.Count -gt 0) {
+        $env:vctargetspath = $modernVCTargets[0].FullName + '\'
+        $VSBuildToolsPath = Get-Item (Join-Path $VisualStudioPath 'VC\Auxiliary\Build')
+        Write-BuildMsg -AsInfo -Message "Using VC targets: $env:vctargetspath"
     }
     elseif ($MSBuildPath | Select-String "2019")
     {
@@ -305,7 +309,10 @@ function Start-OpenSSHPackage
         # Copy payload to DestinationPath instead of packaging
         [string]$DestinationPath = "",
         [switch]$NoOpenSSL,
-        [switch]$OneCore
+        [switch]$OneCore,
+
+        # Do not collect/copy PDB files when the build disables linker symbols.
+        [switch]$SkipSymbols
     )
 
     [System.IO.DirectoryInfo] $repositoryRoot = Get-RepositoryRoot
@@ -347,18 +354,20 @@ function Start-OpenSSHPackage
 
     $symbolsDir = Join-Path $buildDir ($packageName + '_Symbols')
     Remove-Item $symbolsDir -Recurse -Force -ErrorAction SilentlyContinue
-    New-Item $symbolsDir -Type Directory | Out-Null
+    if (-not $SkipSymbols) {
+        New-Item $symbolsDir -Type Directory | Out-Null
+    }
 
     foreach ($file in $payload) {
         if ((-not(Test-Path (Join-Path $buildDir $file)))) {
             Throw "Cannot find $file under $buildDir. Did you run Build-OpenSSH?"
         }
         Copy-Item (Join-Path $buildDir $file) $packageDir -Force
-        if ($file.EndsWith(".exe")) {
+        if (-not $SkipSymbols -and $file.EndsWith(".exe")) {
             $pdb = $file.Replace(".exe", ".pdb")
             Copy-Item (Join-Path $buildDir $pdb) $symbolsDir -Force
         }
-        if ($file.EndsWith(".dll")) {
+        if (-not $SkipSymbols -and $file.EndsWith(".dll")) {
             $pdb = $file.Replace(".dll", ".pdb")
             Copy-Item (Join-Path $buildDir $pdb) $symbolsDir -Force
         }
@@ -370,7 +379,9 @@ function Start-OpenSSHPackage
     {        
         $subPath = $NativeHostArch + "-custom\" + $NativeHostArch + "-custom\bin\"
         Copy-Item -Path $(Join-Path $libreSSLPath "$subPath\libcrypto.dll") -Destination $packageDir -Force -ErrorAction Stop
-        Copy-Item -Path $(Join-Path $libreSSLPath "$subPath\libcrypto.pdb") -Destination $symbolsDir -Force -ErrorAction Stop
+        if (-not $SkipSymbols) {
+            Copy-Item -Path $(Join-Path $libreSSLPath "$subPath\libcrypto.pdb") -Destination $symbolsDir -Force -ErrorAction Stop
+        }
     }    
 
     if ($DestinationPath -ne "") {
@@ -397,23 +408,25 @@ function Start-OpenSSHPackage
     }
     Remove-Item $packageDir -Recurse -Force -ErrorAction SilentlyContinue
 
-    if ($DestinationPath -ne "") {
-        Copy-Item -Path $symbolsDir\* -Destination $DestinationPath -Force -Recurse
-        Write-BuildMsg -AsInfo -Message "Copied symbols to $DestinationPath"
-    }
-    else {
-        Remove-Item ($symbolsDir + '.zip') -Force -ErrorAction SilentlyContinue
-        if(get-command Compress-Archive -ErrorAction SilentlyContinue)
-        {
-            Compress-Archive -Path $symbolsDir -DestinationPath ($symbolsDir + '.zip')
-            Write-BuildMsg -AsInfo -Message "Packaged Symbols - '$symbolsDir.zip'"
+    if (-not $SkipSymbols) {
+        if ($DestinationPath -ne "") {
+            Copy-Item -Path $symbolsDir\* -Destination $DestinationPath -Force -Recurse
+            Write-BuildMsg -AsInfo -Message "Copied symbols to $DestinationPath"
         }
-        else
-        {
-            Write-BuildMsg -AsInfo -Message "Packaged Symbols not compressed."
+        else {
+            Remove-Item ($symbolsDir + '.zip') -Force -ErrorAction SilentlyContinue
+            if(get-command Compress-Archive -ErrorAction SilentlyContinue)
+            {
+                Compress-Archive -Path $symbolsDir -DestinationPath ($symbolsDir + '.zip')
+                Write-BuildMsg -AsInfo -Message "Packaged Symbols - '$symbolsDir.zip'"
+            }
+            else
+            {
+                Write-BuildMsg -AsInfo -Message "Packaged Symbols not compressed."
+            }
         }
+        Remove-Item $symbolsDir -Recurse -Force -ErrorAction SilentlyContinue
     }
-    Remove-Item $symbolsDir -Recurse -Force -ErrorAction SilentlyContinue
 }
 
 function Copy-OpenSSHUnitTests
