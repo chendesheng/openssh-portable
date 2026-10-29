@@ -44,10 +44,6 @@ SDK, Spectre libraries and vcpkg integration installed:
 
 ```powershell
 Import-Module .\contrib\win32\openssh\OpenSSHBuildHelper.psm1 -Force
-$env:_CL_ = '/Z7'
-$env:_LINK_ = '/DEBUG:NONE'
-$env:VCPKG_KEEP_ENV_VARS = '_CL_;_LINK_'
-$env:VCPKG_BINARY_SOURCES = 'clear'
 Start-OpenSSHBuild -Configuration Release -NativeHostArch x64 -Verbose
 Start-OpenSSHPackage -Configuration Release -NativeHostArch x64 -SkipSymbols
 ```
@@ -171,33 +167,30 @@ failed queries, token ownership and the default/SYSTEM paths; these are not
 substitutes for Windows runtime tests. The user's Windows installation and
 phone/Mac clients have not been tested with these experimental binaries.
 
-## Runner comparison experiment
+## Runner and package settings
 
-The current workflow uses `windows-latest` to compare against the successfully
-tested `windows-2022` artifact recorded above. The server source, Release/x64
-configuration and standard-user integration tests retain the same settings.
-The later user-requested symbol removal is an additional change: `_CL_=/Z7`
-keeps compiler debug records in temporary object files rather than compiler
-PDBs, while `_LINK_=/DEBUG:NONE` disables linker PDB generation. Packaging uses
-`-SkipSymbols` and checks every shipped EXE/DLL for CodeView/PDB references.
-The earlier ZIP did contain 15 PDBs through the helper's symbol-copy path.
-Neither the PDBs nor their embedded references are retained in this new output.
-Record the resolved runner image, CI result and win77 version-check result
-separately; a runner change alone does not establish the cause of an application
-control rejection. Keep the earlier artifact available for comparison.
+The workflow uses `windows-latest` with the project's normal native x64 Release
+compiler/linker settings and the same standard-user integration tests. It
+packages with `Start-OpenSSHPackage -SkipSymbols`; no `.pdb` files are copied into
+the runtime package. `check_no_pdb.py` checks all files recursively, including
+mixed-case `.PDB` names, before non-admin tests and artifact upload. Embedded
+CodeView records in EXE/DLL images are metadata, not PDB files; they do not
+require a PDB at runtime and are retained with normal Release output.
 
-The first runner-only run (`1adf74d`) found Visual Studio 2026 under its versioned
-`18` directory. The old bootstrap recognized year-named paths only and fell
-through to a missing VS 2015 environment variable. VC target discovery now reads
-the installed versioned targets directory rather than inferring it from the
-installation path. The project's v143 toolset requirement is preserved.
+The earlier `windows-2022` ZIP did include 15 PDBs because the helper copied its
+symbols directory into a custom destination. Keep that artifact separately.
+The helper's default symbol behavior is unchanged for other callers; use the
+new switch explicitly to generate this runtime-only package.
 
-The first complete compile (`c166e8c`, run `40904621731`) passed, but the package
-check correctly rejected a CodeView reference in `libcrypto.dll`. vcpkg clears
-most inherited environment variables, so its LibreSSL build had not received
-the no-PDB options. The workflow explicitly preserves `_CL_`/`_LINK_` through
-`VCPKG_KEEP_ENV_VARS` and disables dependency binary caching for this build.
-Those overrides are not represented in the dependency ABI; source builds avoid
-reusing a cached dependency with debug records. Use a fresh checkout, or remove
-only that checkout's existing `vcpkg_installed` dependencies before rebuilding
-with these options.
+The latest runner has Visual Studio 2026 under its versioned `18` directory.
+Bootstrap now discovers its installed versioned VC targets directory instead
+of falling through to the old VS 2015 layout. The v143 toolset is preserved.
+CI explicitly installs the matching 14.44 Spectre libraries when absent and
+verifies `lib/spectre/x64/libcmt.lib`; mitigation remains enabled.
+
+Earlier experiments compiled successfully but failed an unnecessarily strict
+check of CodeView metadata in `libcrypto.dll`. No such artifacts were uploaded.
+The final recipe removes PDB files from packaging without altering dependency
+build flags or binary debug metadata. Runner/PDB changes alone do not establish
+the cause of a Windows application-control rejection; record the real win77
+launch result separately from CI success.

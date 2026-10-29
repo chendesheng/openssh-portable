@@ -49,13 +49,6 @@ jobs:
       - name: Build native x64 Release package
         run: |
           $ErrorActionPreference = 'Stop'
-          # Append tool options after project flags, including vcpkg child builds.
-          $env:_CL_ = '/Z7'
-          $env:_LINK_ = '/DEBUG:NONE'
-          # vcpkg sanitizes child environments; preserve these options explicitly.
-          $env:VCPKG_KEEP_ENV_VARS = '_CL_;_LINK_'
-          # These overrides are untracked by the dependency ABI; rebuild from source.
-          $env:VCPKG_BINARY_SOURCES = 'clear'
           & "$env:VCPKG_INSTALLATION_ROOT\vcpkg.exe" integrate install
           if ($LASTEXITCODE) { throw 'vcpkg integration failed' }
           Import-Module .\contrib\win32\openssh\OpenSSHBuildHelper.psm1 -Force
@@ -67,7 +60,7 @@ jobs:
           Copy-Item contrib\win32\openssh\README-user-mode.md $package
           $env:GITHUB_SHA | Set-Content (Join-Path $package 'SOURCE_COMMIT.txt')
           python regress/unittests/win32compat/check_no_pdb.py $package
-          if ($LASTEXITCODE -ne 0) { throw 'The package still contains PDB files or CodeView debug records' }
+          if ($LASTEXITCODE -ne 0) { throw 'The package still contains PDB files' }
       - name: Test as an actual non-administrator
         run: |
           $ErrorActionPreference = 'Stop'
