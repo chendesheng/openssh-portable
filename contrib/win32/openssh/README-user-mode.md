@@ -194,3 +194,31 @@ The final recipe removes PDB files from packaging without altering dependency
 build flags or binary debug metadata. Runner/PDB changes alone do not establish
 the cause of a Windows application-control rejection; record the real win77
 launch result separately from CI success.
+
+## Verified runtime-only package
+
+Source `5922bde97295dcabc42d21e80e3244546aca5e57` passed
+[run 40909315347](https://github.com/chendesheng/openssh-portable/actions/runs/40909315347)
+on Windows Server 2025 `10.0.26100`, image `windows-2025-vs2026` /
+`20261021.278.1`. The package check found zero PDBs and 15 runtime EXE/DLL files.
+All four native standard-user PASS markers and `ALL_USER_MODE_TESTS_PASSED`
+were present, including concurrent clients with two authorized keys and PTY,
+key/account rejection and continued acceptance after session exit.
+
+[Download artifact 12913596911](https://github.com/chendesheng/openssh-portable/actions/runs/40909315347/artifacts/12913596911)
+(`5966735` bytes). ZIP SHA-256:
+
+```text
+57a1890540304db3018455f910309f7197c51d24a9f36aa092410e8a6f2cfc21
+```
+
+Back up the ZIP before GitHub artifact expiration. Verify `SOURCE_COMMIT.txt`
+against that exact source; this later documentation commit does not change the
+binaries. The earlier Windows 2022 artifact remains a separate baseline.
+
+The new package was staged separately under the user's `Tools` directory on
+win77. A direct Git Bash version launch still failed with exit 126. A fresh
+Code Integrity 3077 event identifies the new `sshd.exe` and the same enforced
+application-control policy. Thus this runner/package change did not resolve
+that host's execution block. Existing Git SSH remains running; no new server,
+startup configuration or Windows policy was activated by this comparison.
