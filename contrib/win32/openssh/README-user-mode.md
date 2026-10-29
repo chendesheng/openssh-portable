@@ -122,8 +122,44 @@ binaries successfully. Its integration wrapper incorrectly treated a null child
 exit code as success; the test actually stopped during key generation, so that
 run does **not** prove non-admin concurrency. The corrected harness retains
 process handles and requires a result JSON containing the expected standard-user
-SID plus a completion marker after all checks. Record the corrected run's
-result here once it completes.
+SID plus a completion marker after all checks.
+The corrected [Windows run 40861232809](https://github.com/chendesheng/openssh-portable/actions/runs/40861232809)
+passed on **Windows Server 2022 10.0.20348**, runner image
+`windows-2022` / `20261025.346.1`. The source commit was
+`ea35d9c91354312c80d6655f8d602799d2ecfd3e`; the source banner is
+`OpenSSH_for_Windows_10.5p1 Win32-OpenSSH-GitHub`. This was a native x64 Release
+build, not Cygwin. All four explicit PASS lines and
+`ALL_USER_MODE_TESTS_PASSED` were present: two authorized keys with overlapping
+independent clients and PTY under a standard user, unauthorized-key denial,
+another enabled account denied by the SID guard, and subsequent connection
+acceptance after session completion. CI also checked the expected standard-user
+SID and its non-administrator result JSON.
+
+[Download the complete tested artifact](https://github.com/chendesheng/openssh-portable/actions/runs/40861232809/artifacts/12892181184),
+artifact ID `12892181184`, size `32416443` bytes. ZIP SHA-256:
+
+```text
+4bf588e5c2b9b0fdec62309f12d4d112f01ac1dc83bbd96bf831ccc3b1048d80
+```
+
+GitHub artifacts expire. Keep this ZIP and the exact source revision in a
+separate user-controlled backup. The artifact's `SOURCE_COMMIT.txt` records the
+build revision; later documentation-only commits do not change these binaries.
+The workflow uses its runner's VS/vcpkg installation, so a later rebuild is a
+compatible source build rather than a claim of byte-identical output.
+
+For a LAN-accessed host such as `win71`, explicitly request the existing LAN
+listener after backing up its private state and stopping the old launcher:
+
+```powershell
+.\Start-UserSshd.ps1 -ClientPublicKeyPath .\windows_ssh.pub -Port 2000 -ListenAddress 0.0.0.0
+```
+
+Existing Windows Firewall access is required. The default loopback listener is
+appropriate when an existing local gateway forwards the private-network port.
+The launcher writes its PID file into the same user-writable state directory;
+it does not attempt to create `%ProgramData%\ssh\sshd.pid`.
+
 Portable API-double tests also exercise restricted/different token rejection,
 failed queries, token ownership and the default/SYSTEM paths; these are not
 substitutes for Windows runtime tests. The user's Windows installation and
