@@ -100,11 +100,13 @@ if (-not (Test-Path -LiteralPath $hostKey)) {
 
 $hostKeyConfig = $hostKey.Replace('\', '/')
 $authorizedConfig = $authorized.Replace('\', '/')
+$pidConfig = (Join-Path $state 'sshd.pid').Replace('\', '/')
 [IO.File]::WriteAllText($config, @"
 Port $Port
 ListenAddress $ListenAddress
 HostKey "$hostKeyConfig"
 AuthorizedKeysFile "$authorizedConfig"
+PidFile "$pidConfig"
 AllowUsers "$login"
 PubkeyAuthentication yes
 AuthenticationMethods publickey
@@ -128,7 +130,7 @@ if ($ValidateOnly) {
 }
 
 Write-Host "Starting concurrent current-user sshd on $ListenAddress port $Port as $login."
-Write-Host "Connect through the private network: ssh -i ~/.ssh/windows_ssh -p $Port -l '$login' 100.96.0.4"
+Write-Host "Connect using the Windows address or configured SSH alias and port $Port."
 Write-Host 'Keep this window open. Press Ctrl+C to stop.'
 Write-Warning 'Use the complete patched binary package, including sshd-auth.exe and sshd-session.exe.'
 

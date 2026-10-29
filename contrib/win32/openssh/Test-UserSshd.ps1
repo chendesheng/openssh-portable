@@ -70,6 +70,12 @@ public static class OpenSshUserModeNative {
             stdout.Dispose(); stderr.Dispose(); p.Dispose(); throw;
         }
     }
+    public static string ReadLiveFile(string path) {
+        using (FileStream stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+        using (StreamReader reader = new StreamReader(stream, Encoding.UTF8)) {
+            return reader.ReadToEnd();
+        }
+    }
     public static void Drain(Process p) {
         p.WaitForExit();
         StreamWriter[] output;
@@ -178,8 +184,13 @@ try {
         $other = Start-Native $ssh ($otherArgs + @('whoami')) 'other-user'
         if (-not $other.WaitForExit(15000)) { throw 'Other-account test timed out.' }
         if ($other.ExitCode -eq 0) { throw 'A different account was accepted.' }
-        $serverLog = [IO.File]::ReadAllText((Join-Path $state 'server.err'))
-        if (-not $serverLog.Contains('not allowed by current-user-only mode')) {
+        $guardSeen = $false
+        for ($i = 0; $i -lt 50 -and -not $guardSeen; $i++) {
+            $serverLog = [OpenSshUserModeNative]::ReadLiveFile((Join-Path $state 'server.err'))
+            $guardSeen = $serverLog.Contains('not allowed by current-user-only mode')
+            if (-not $guardSeen) { Start-Sleep -Milliseconds 100 }
+        }
+        if (-not $guardSeen) {
             throw 'The explicit account restriction was not exercised.'
         }
         Write-Output 'PASS: another enabled account is rejected by the current-user-only guard.'
