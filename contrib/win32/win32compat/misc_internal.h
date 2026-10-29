@@ -75,6 +75,8 @@ int file_in_chroot_jail_helper(wchar_t*);
 PSID lookup_sid(const wchar_t* name_utf16, PSID psid, DWORD * psid_len);
 PSID get_sid(const char*);
 int am_system();
+int w32_current_user_only(void);
+int w32_is_current_user(const char *user);
 int is_conpty_supported();
 int exec_command_with_pty(int * pid, char* cmd, int in, int out, int err, unsigned int col, unsigned int row, int ttyfd);
 char * build_exec_command(const char * command);

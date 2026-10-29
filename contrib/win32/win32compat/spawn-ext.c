@@ -6,6 +6,33 @@
 
 int posix_spawn_internal(pid_t *pidp, const char *path, const posix_spawn_file_actions_t *file_actions, const posix_spawnattr_t *attrp, char *const argv[], char *const envp[], HANDLE user_token, BOOLEAN prepend_module_path, BOOLEAN load_user_env);
 
+/*
+ * Only the very same primary token can be replaced by CreateProcessW. A SID
+ * comparison would also match restricted tokens or another logon session and
+ * could accidentally discard the caller's requested security context.
+ */
+static int
+is_current_process_token(HANDLE token)
+{
+	HANDLE current = NULL;
+	TOKEN_STATISTICS requested_info, current_info;
+	DWORD size;
+	int same = 0;
+
+	if (!OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &current))
+		return 0;
+	if (GetTokenInformation(token, TokenStatistics, &requested_info,
+	    sizeof(requested_info), &size) &&
+	    GetTokenInformation(current, TokenStatistics, &current_info,
+	    sizeof(current_info), &size)) {
+		same = requested_info.TokenType == TokenPrimary &&
+		    requested_info.TokenId.LowPart == current_info.TokenId.LowPart &&
+		    requested_info.TokenId.HighPart == current_info.TokenId.HighPart;
+	}
+	CloseHandle(current);
+	return same;
+}
+
 int
 __posix_spawn_asuser(pid_t *pidp, const char *path, const posix_spawn_file_actions_t *file_actions, const posix_spawnattr_t *attrp, char *const argv[], char *const envp[], char* user)
 {
@@ -37,6 +64,21 @@ __posix_spawn_asuser(pid_t *pidp, const char *path, const posix_spawn_file_actio
 			return -1;
 		}
 	}
+	/* SYSTEM and non-opt-in spawning keep their existing token-based path. */
+	if (w32_current_user_only() && !am_system()) {
+		if (!is_current_process_token(user_token)) {
+			error("current-user-only mode refuses a different process token");
+			errno = EACCES;
+			goto token_cleanup;
+		}
+		debug3("current-user-only mode: spawning with the process token");
+		r = posix_spawn_internal(&pid, path, file_actions, attrp, argv,
+		    envp, NULL, TRUE, FALSE);
+		if (pidp && r == 0)
+			*pidp = pid;
+		goto token_cleanup;
+	}
+
 	/*
 	 * This identity check decides whether to load both the user's profile and
 	 * environment block.
@@ -71,6 +113,7 @@ __posix_spawn_asuser(pid_t *pidp, const char *path, const posix_spawn_file_actio
 		}
 	}
 
+token_cleanup:
 	/* token ownership: SSPI token is freed by the GSS credential, not here */
 	if (!token_from_sspi) {
 		CloseHandle(user_token);

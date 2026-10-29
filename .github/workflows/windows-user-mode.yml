@@ -1,0 +1,92 @@
+name: Windows current-user build
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [user-mode-sshd]
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    runs-on: windows-2022
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: powershell
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+      - name: Parse user-mode scripts
+        run: |
+          foreach ($name in 'Start-UserSshd.ps1', 'Test-UserSshd.ps1') {
+            $path = Join-Path 'contrib\win32\openssh' $name
+            $tokens = $null; $errors = $null
+            $null = [Management.Automation.Language.Parser]::ParseFile(
+              (Resolve-Path $path), [ref]$tokens, [ref]$errors)
+            if ($errors) { throw ($errors | Out-String) }
+          }
+      - name: Build native x64 Release package
+        run: |
+          $ErrorActionPreference = 'Stop'
+          & "$env:VCPKG_INSTALLATION_ROOT\vcpkg.exe" integrate install
+          if ($LASTEXITCODE) { throw 'vcpkg integration failed' }
+          Import-Module .\contrib\win32\openssh\OpenSSHBuildHelper.psm1 -Force
+          Start-OpenSSHBuild -Configuration Release -NativeHostArch x64 -Verbose
+          $package = Join-Path $env:RUNNER_TEMP 'OpenSSH-Win64-UserMode'
+          Start-OpenSSHPackage -Configuration Release -NativeHostArch x64 -DestinationPath $package
+          Copy-Item contrib\win32\openssh\Start-UserSshd.ps1 $package
+          Copy-Item contrib\win32\openssh\Test-UserSshd.ps1 $package
+          Copy-Item contrib\win32\openssh\README-user-mode.md $package
+          $env:GITHUB_SHA | Set-Content (Join-Path $package 'SOURCE_COMMIT.txt')
+      - name: Test as an actual non-administrator
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $suffix = [guid]::NewGuid().ToString('N').Substring(0, 8)
+          $user = 'sshuser' + $suffix
+          $other = 'sshother' + $suffix
+          $password = ConvertTo-SecureString ([guid]::NewGuid().ToString('N') + 'aA1!') -AsPlainText -Force
+          $work = Join-Path $env:PUBLIC ('OpenSSH-UserMode-' + $suffix)
+          $null = New-Item -ItemType Directory $work
+          $package = Join-Path $work 'package'
+          Copy-Item (Join-Path $env:RUNNER_TEMP 'OpenSSH-Win64-UserMode') $package -Recurse
+          try {
+            $null = New-LocalUser -Name $user -Password $password
+            $null = New-LocalUser -Name $other -Password $password
+            $users = Get-LocalGroup -SID 'S-1-5-32-545'
+            Add-LocalGroupMember -Group $users -Member $user, $other
+            & icacls.exe $work /grant "${env:COMPUTERNAME}\${user}:(OI)(CI)F" /T | Out-Null
+            if ($LASTEXITCODE) { throw 'Test-directory ACL setup failed' }
+            Start-Service seclogon
+            $credential = [Management.Automation.PSCredential]::new("$env:COMPUTERNAME\$user", $password)
+            $command = "`$env:TEMP = '$work'; & '$package\Test-UserSshd.ps1' -OpenSshDirectory '$package' -OtherUser '$env:COMPUTERNAME\$other'"
+            $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($command))
+            $process = Start-Process powershell.exe -Credential $credential -LoadUserProfile -PassThru `
+              -WorkingDirectory $work -RedirectStandardOutput "$work\test.out" -RedirectStandardError "$work\test.err" `
+              -ArgumentList @('-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', $encoded)
+            if (-not $process.WaitForExit(120000)) {
+              & taskkill.exe /PID $process.Id /T /F | Out-Null
+              throw 'Non-admin integration test timed out'
+            }
+            $process.WaitForExit()
+            Get-Content "$work\test.out"
+            Get-Content "$work\test.err"
+            if ($process.ExitCode) { throw "Non-admin test failed: $($process.ExitCode)" }
+          } finally {
+            Remove-LocalUser -Name $user -ErrorAction SilentlyContinue
+            Remove-LocalUser -Name $other -ErrorAction SilentlyContinue
+            Remove-Item $work -Recurse -Force -ErrorAction SilentlyContinue
+          }
+      - name: Upload complete binary package
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: OpenSSH-Win64-UserMode-${{ github.sha }}
+          path: ${{ runner.temp }}/OpenSSH-Win64-UserMode/
+          if-no-files-found: error
+      - name: Upload build log on failure
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: windows-user-mode-build-log
+          path: '**/*build*.log'
+          if-no-files-found: ignore

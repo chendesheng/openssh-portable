@@ -1610,6 +1610,29 @@ am_system()
 	return running_as_system;
 }
 
+/* Explicit opt-in; inherited by the listener, monitors and session workers. */
+int
+w32_current_user_only(void)
+{
+	char value[2];
+
+	return GetEnvironmentVariableA("OPENSSH_CURRENT_USER_ONLY", value,
+	    sizeof(value)) == 1 && value[0] == '1';
+}
+
+/* Compare SIDs, not display names or the POSIX uid placeholder (always 1). */
+int
+w32_is_current_user(const char *user)
+{
+	PSID current = get_sid(NULL), requested = get_sid(user);
+	int same = current != NULL && requested != NULL &&
+	    EqualSid(current, requested);
+
+	free(current);
+	free(requested);
+	return same;
+}
+
 /*
  * Returns SID of user/group. If psid argument is NULL, allocates a new one,
  * otherwise saves SID into the supplied memory area.

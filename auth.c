@@ -120,6 +120,14 @@ allowed_user(struct ssh *ssh, struct passwd * pw)
 	if (!pw || !pw->pw_name)
 		return 0;
 
+#ifdef WINDOWS
+	if (w32_current_user_only() &&
+	    (am_system() || !w32_is_current_user(pw->pw_name))) {
+		logit("User %.100s not allowed by current-user-only mode", pw->pw_name);
+		return 0;
+	}
+#endif
+
 	if (!options.use_pam && platform_locked_account(pw)) {
 		logit("User %.100s not allowed because account is locked",
 		    pw->pw_name);
