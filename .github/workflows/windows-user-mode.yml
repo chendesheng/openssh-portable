@@ -27,6 +27,25 @@ jobs:
               (Resolve-Path $path), [ref]$tokens, [ref]$errors)
             if ($errors) { throw ($errors | Out-String) }
           }
+      - name: Install v143 Spectre libraries
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $installer = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer'
+          $vswhere = Join-Path $installer 'vswhere.exe'
+          $vs = & $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.14.44.17.14.x86.x64 -property installationPath
+          if (-not $vs) { throw 'The runner has no v143 14.44 build tools' }
+          $component = 'Microsoft.VisualStudio.Component.VC.14.44.17.14.x86.x64.Spectre'
+          $installed = & $vswhere -latest -products '*' -requires $component -property installationPath
+          if ($installed -ne $vs) {
+            $arguments = 'modify --installPath "' + $vs + '" --add ' + $component + ' --quiet --norestart'
+            $process = Start-Process (Join-Path $installer 'setup.exe') -ArgumentList $arguments -Wait -PassThru
+            if ($process.ExitCode -notin 0, 3010) { throw "Spectre library installation failed: $($process.ExitCode)" }
+          }
+          $tools = Get-ChildItem (Join-Path $vs 'VC\Tools\MSVC') -Directory |
+            Where-Object Name -Like '14.44.*' | Sort-Object Name -Descending | Select-Object -First 1
+          $library = Join-Path $tools.FullName 'lib\spectre\x64\libcmt.lib'
+          if (-not (Test-Path $library)) { throw "Missing v143 Spectre library: $library" }
+          Write-Host "Using Spectre libraries: $library"
       - name: Build native x64 Release package
         run: |
           $ErrorActionPreference = 'Stop'

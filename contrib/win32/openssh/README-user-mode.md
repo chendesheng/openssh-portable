@@ -33,7 +33,9 @@ this is not the SYSTEM service's separate low-privilege virtual account.
 
 Use the **Windows current-user build** GitHub Actions workflow on your fork.
 It builds native x64 Release binaries on `windows-latest`; the existing portable
-CI's Cygwin builds are not equivalent. The workflow also parses the PowerShell
+CI's Cygwin builds are not equivalent. The workflow installs the v143 14.44
+Spectre libraries when the runner lacks them, preserving the project mitigation
+setting. The workflow also parses the PowerShell
 scripts and runs the compiled server test as a separate, non-administrator local
 account. Download the artifact for the exact commit you intend to test.
 
