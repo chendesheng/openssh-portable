@@ -11,7 +11,9 @@ param(
     [ValidateRange(1, 65535)]
     [int]$Port = 2000,
 
-    [System.Net.IPAddress]$ListenAddress = '127.0.0.1'
+    [System.Net.IPAddress]$ListenAddress = '127.0.0.1',
+
+    [switch]$ValidateOnly
 )
 
 Set-StrictMode -Version Latest
@@ -55,6 +57,11 @@ $publicKey = $publicKeys -join "`n"
 
 $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
 $login = $identity.Name.ToLowerInvariant()
+# OpenSSH canonicalizes local accounts to an unqualified SAM name.
+$localPrefix = [Environment]::MachineName.ToLowerInvariant() + '\'
+if ($login.StartsWith($localPrefix, [StringComparison]::OrdinalIgnoreCase)) {
+    $login = $login.Substring($localPrefix.Length)
+}
 $state = Join-Path $env:LOCALAPPDATA "OpenSSH-User-$Port"
 $null = New-Item -ItemType Directory -Path $state -Force
 
@@ -113,6 +120,11 @@ LogLevel VERBOSE
 & $sshd -t -f $config
 if ($LASTEXITCODE -ne 0) {
     throw 'sshd configuration/key validation failed. See the error above.'
+}
+
+if ($ValidateOnly) {
+    Write-Host "Validated configuration: $config"
+    return
 }
 
 Write-Host "Starting concurrent current-user sshd on $ListenAddress port $Port as $login."

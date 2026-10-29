@@ -65,6 +65,8 @@ The launcher generates/reuses the host key and writes its isolated config in
 `%LOCALAPPDATA%\OpenSSH-User-2000`. The directory grants access to the current
 user and SYSTEM. Each run rewrites its generated config and authorized_keys;
 edit the input public-key file or launcher parameters instead of those outputs.
+Use `-ValidateOnly` to generate/check that configuration without starting a
+listener. Local account names are normalized to OpenSSH's unqualified SAM form.
 Existing `%USERPROFILE%\.ssh\authorized_keys` is not changed. Do not put client
 private keys on the server.
 
@@ -91,7 +93,8 @@ preserve the host key/fingerprint when restoring this Windows installation.
 
 Run `Test-UserSshd.ps1 -OpenSshDirectory <extracted-package>` from an ordinary
 Windows account. It refuses an elevated/SYSTEM context and uses temporary keys,
-config, loopback listener and an isolated port. It requires two independent SSH
+config, loopback listener and an isolated port. It validates and uses the actual
+launcher's generated config with two authorized client keys. It requires two independent SSH
 connections to succeed concurrently, verifies the returned Windows identity,
 forces a PTY session, rejects an unauthorized client key, and checks that the
 listener survives session completion. Test-only private material is deleted.
@@ -111,3 +114,16 @@ before restoring it, preserve its private state/host key, and unset
 connection at a time. Do not install the experimental binaries over a working
 SYSTEM service. No change to VPS exit routing, sing-box credentials or WireGuard
 peer enrollment is part of this experiment.
+
+## Recorded checks (2026-10-29)
+
+The first Windows workflow run (commit `b2e2251`) built native x64 Release
+binaries and passed independent concurrent clients, a forced PTY, unauthorized
+key rejection, explicit other-account rejection, and subsequent reconnection
+under a separate standard user on Windows Server 2022. That run used the
+standalone test configuration. The launcher SAM-name fix and generated-config
+coverage are being validated separately; update this record with their result.
+Portable API-double tests also exercise restricted/different token rejection,
+failed queries, token ownership and the default/SYSTEM paths; these are not
+substitutes for Windows runtime tests. The user's Windows installation and
+phone/Mac clients have not been tested with these experimental binaries.

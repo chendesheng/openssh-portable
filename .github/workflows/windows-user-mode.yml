@@ -4,6 +4,7 @@ on:
   workflow_dispatch:
   push:
     branches: [user-mode-sshd]
+    paths-ignore: ['**.md']
 
 permissions:
   contents: read

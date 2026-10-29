@@ -55,32 +55,28 @@ function Encode-Command([string]$Source) {
 }
 try {
     $env:OPENSSH_CURRENT_USER_ONLY = '1'
-    foreach ($name in @('host', 'client', 'unauthorized')) {
+    foreach ($name in @('client', 'second-client', 'unauthorized')) {
         Wait-Success (Start-Native $keygen @('-q', '-t', 'ed25519', '-N', '', '-f', (Join-Path $state $name)) $name)
     }
-    $authorized = Join-Path $state 'authorized_keys'
-    Copy-Item (Join-Path $state 'client.pub') $authorized
+    $authorized = Join-Path $state 'authorized_clients.pub'
+    $keys = [IO.File]::ReadAllText((Join-Path $state 'client.pub')).Trim() + "`n" +
+        [IO.File]::ReadAllText((Join-Path $state 'second-client.pub')).Trim() + "`n"
+    [IO.File]::WriteAllText($authorized, $keys, $utf8)
     $reservation = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback, 0)
     $reservation.Start()
     $port = $reservation.LocalEndpoint.Port
     $reservation.Stop()
-    $config = Join-Path $state 'sshd_config'
-    $hostKeyPath = (Join-Path $state 'host').Replace('\', '/')
-    $authorizedPath = $authorized.Replace('\', '/')
     $login = $identity.Name.ToLowerInvariant()
-    [IO.File]::WriteAllText($config, @"
-Port $port
-ListenAddress 127.0.0.1
-HostKey "$hostKeyPath"
-AuthorizedKeysFile "$authorizedPath"
-AuthenticationMethods publickey
-PubkeyAuthentication yes
-PasswordAuthentication no
-KbdInteractiveAuthentication no
-StrictModes yes
-LogLevel DEBUG3
-Subsystem sftp internal-sftp
-"@, $utf8)
+    # Exercise the production launcher's ACLs, multi-key parsing and local SAM
+    # normalization; keep its generated files isolated from the user's settings.
+    $escapedState = $state.Replace("'", "''")
+    $escapedPackage = $OpenSshDirectory.Replace("'", "''")
+    $escapedKeys = $authorized.Replace("'", "''")
+    $launcherCommand = Encode-Command "`$env:LOCALAPPDATA = '$escapedState'; & '$escapedPackage\Start-UserSshd.ps1' -OpenSshDirectory '$escapedPackage' -ClientPublicKeyPath '$escapedKeys' -Port $port -ValidateOnly"
+    $encodedLauncher = $launcherCommand.Substring($launcherCommand.LastIndexOf(' ') + 1)
+    $powershell = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+    Wait-Success (Start-Native $powershell @('-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', $encodedLauncher) 'launcher')
+    $config = Join-Path $state "OpenSSH-User-$port\sshd_config"
     Wait-Success (Start-Native $sshd @('-t', '-f', $config) 'validate')
     # Uppercase -D is essential: two separate connections must be accepted.
     $server = Start-Native $sshd @('-D', '-e', '-f', $config) 'server'
@@ -110,13 +106,16 @@ Subsystem sftp internal-sftp
     }
     if (-not (Test-Path -LiteralPath $marker)) { throw 'First authenticated session never became ready.' }
     # A separate process/TCP connection, explicitly without ControlMaster.
-    $ptyArgs = @('-tt') + $common + @((Encode-Command 'whoami'))
+    $secondArgs = @($common)
+    $secondKeyIndex = [array]::IndexOf($secondArgs, '-i') + 1
+    $secondArgs[$secondKeyIndex] = Join-Path $state 'second-client'
+    $ptyArgs = @('-tt') + $secondArgs + @((Encode-Command 'whoami'))
     $second = Start-Native $ssh $ptyArgs 'second'
     Wait-Success $second
     if ($first.HasExited) { throw 'The two authenticated clients did not overlap.' }
     $returnedIdentity = [IO.File]::ReadAllText((Join-Path $state 'second.out')).ToLowerInvariant()
     if (-not $returnedIdentity.Contains($login)) { throw 'PTY session ran as the wrong account.' }
-    Write-Output 'PASS: concurrent independent clients and PTY run as the standard user.'
+    Write-Output 'PASS: two authorized client keys, concurrent independent clients and PTY run as the standard user.'
     $badArgs = @($common)
     $keyIndex = [array]::IndexOf($badArgs, '-i') + 1
     $badArgs[$keyIndex] = Join-Path $state 'unauthorized'
