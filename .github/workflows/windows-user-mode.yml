@@ -60,11 +60,12 @@ jobs:
             if ($LASTEXITCODE) { throw 'Test-directory ACL setup failed' }
             Start-Service seclogon
             $credential = [Management.Automation.PSCredential]::new("$env:COMPUTERNAME\$user", $password)
-            $command = "`$env:TEMP = '$work'; & '$package\Test-UserSshd.ps1' -OpenSshDirectory '$package' -OtherUser '$env:COMPUTERNAME\$other'"
+            $command = "`$ProgressPreference = 'SilentlyContinue'; `$ErrorActionPreference = 'Stop'; `$env:TEMP = '$work'; try { & '$package\Test-UserSshd.ps1' -OpenSshDirectory '$package' -OtherUser '$env:COMPUTERNAME\$other' -ResultPath '$work\result.json'; exit 0 } catch { [Console]::Error.WriteLine(`$_.ToString()); exit 1 }"
             $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($command))
             $process = Start-Process powershell.exe -Credential $credential -LoadUserProfile -PassThru `
               -WorkingDirectory $work -RedirectStandardOutput "$work\test.out" -RedirectStandardError "$work\test.err" `
               -ArgumentList @('-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', $encoded)
+            $null = $process.Handle
             if (-not $process.WaitForExit(120000)) {
               & taskkill.exe /PID $process.Id /T /F | Out-Null
               throw 'Non-admin integration test timed out'
@@ -72,7 +73,16 @@ jobs:
             $process.WaitForExit()
             Get-Content "$work\test.out"
             Get-Content "$work\test.err"
-            if ($process.ExitCode) { throw "Non-admin test failed: $($process.ExitCode)" }
+            if ($null -ne $process.ExitCode -and $process.ExitCode -ne 0) { throw "Non-admin test failed: $($process.ExitCode)" }
+            $result = Get-Content "$work\result.json" -Raw | ConvertFrom-Json
+            $expectedSid = (Get-LocalUser -Name $user).SID.Value
+            if (-not $result.passed -or $result.administrator -or $result.sid -ne $expectedSid -or
+                $result.clients -ne 2 -or $result.authorizedKeys -ne 2) {
+              throw 'Missing or invalid non-admin concurrency result'
+            }
+            if ((Get-Content "$work\test.out" -Raw) -notmatch 'ALL_USER_MODE_TESTS_PASSED') {
+              throw 'The standard-user test did not reach its completion marker'
+            }
           } finally {
             Remove-LocalUser -Name $user -ErrorAction SilentlyContinue
             Remove-LocalUser -Name $other -ErrorAction SilentlyContinue

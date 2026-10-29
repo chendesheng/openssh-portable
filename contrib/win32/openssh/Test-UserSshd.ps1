@@ -1,7 +1,8 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)][string]$OpenSshDirectory,
-    [string]$OtherUser
+    [string]$OtherUser,
+    [string]$ResultPath
 )
 
 Set-StrictMode -Version Latest
@@ -33,20 +34,67 @@ $utf8 = [Text.UTF8Encoding]::new($false)
 $processes = [Collections.Generic.List[Diagnostics.Process]]::new()
 $previousMode = $env:OPENSSH_CURRENT_USER_ONLY
 
+# Start-Process -PassThru in Windows PowerShell can return a Process without
+# a retained handle/exit code. Start through .NET and drain output using C#
+# handlers (PowerShell scriptblocks cannot run on these background threads).
+if (-not ('OpenSshUserModeNative' -as [type])) {
+    Add-Type -TypeDefinition @'
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.IO;
+using System.Text;
+public static class OpenSshUserModeNative {
+    private static readonly Dictionary<Process, StreamWriter[]> Writers = new Dictionary<Process, StreamWriter[]>();
+    public static Process Start(string file, string arguments, string output, string error) {
+        Process p = new Process();
+        p.StartInfo = new ProcessStartInfo(file, arguments);
+        p.StartInfo.UseShellExecute = false;
+        p.StartInfo.CreateNoWindow = true;
+        p.StartInfo.RedirectStandardInput = true;
+        p.StartInfo.RedirectStandardOutput = true;
+        p.StartInfo.RedirectStandardError = true;
+        StreamWriter stdout = new StreamWriter(new FileStream(output, FileMode.Create, FileAccess.Write, FileShare.ReadWrite), new UTF8Encoding(false));
+        StreamWriter stderr = new StreamWriter(new FileStream(error, FileMode.Create, FileAccess.Write, FileShare.ReadWrite), new UTF8Encoding(false));
+        stdout.AutoFlush = stderr.AutoFlush = true;
+        p.OutputDataReceived += (sender, data) => { if (data.Data != null) { lock (stdout) { stdout.WriteLine(data.Data); } } };
+        p.ErrorDataReceived += (sender, data) => { if (data.Data != null) { lock (stderr) { stderr.WriteLine(data.Data); } } };
+        try {
+            p.Start();
+            Writers.Add(p, new StreamWriter[] { stdout, stderr });
+            p.BeginOutputReadLine();
+            p.BeginErrorReadLine();
+            p.StandardInput.Close();
+            return p;
+        } catch {
+            stdout.Dispose(); stderr.Dispose(); p.Dispose(); throw;
+        }
+    }
+    public static void Drain(Process p) {
+        p.WaitForExit();
+        StreamWriter[] output;
+        if (Writers.TryGetValue(p, out output)) {
+            Writers.Remove(p);
+            output[0].Dispose(); output[1].Dispose();
+        }
+    }
+}
+'@
+}
+
 function Quote-NativeArgument([string]$Value) {
     '"' + [regex]::Replace([regex]::Replace($Value, '(\\*)"', '$1$1\"'), '(\\+)$', '$1$1') + '"'
 }
 function Start-Native([string]$File, [string[]]$Arguments, [string]$Name) {
     $commandLine = ($Arguments | ForEach-Object { Quote-NativeArgument $_ }) -join ' '
-    $p = Start-Process -FilePath $File -ArgumentList $commandLine -PassThru -NoNewWindow `
-        -RedirectStandardOutput (Join-Path $state ($Name + '.out')) `
-        -RedirectStandardError (Join-Path $state ($Name + '.err'))
+    $p = [OpenSshUserModeNative]::Start($File, $commandLine,
+        (Join-Path $state ($Name + '.out')), (Join-Path $state ($Name + '.err')))
     $processes.Add($p)
     return $p
 }
 function Wait-Success([Diagnostics.Process]$Process, [int]$Seconds = 15) {
     if (-not $Process.WaitForExit($Seconds * 1000)) { throw 'Child process timed out.' }
-    $Process.WaitForExit()
+    [OpenSshUserModeNative]::Drain($Process)
     if ($Process.ExitCode -ne 0) { throw "Child process failed: $($Process.ExitCode)" }
 }
 function Encode-Command([string]$Source) {
@@ -152,8 +200,18 @@ catch {
 finally {
     foreach ($p in $processes) {
         if (-not $p.HasExited) { & "$env:SystemRoot\System32\taskkill.exe" /PID $p.Id /T /F 2>$null | Out-Null }
+        [OpenSshUserModeNative]::Drain($p)
         $p.Dispose()
     }
     $env:OPENSSH_CURRENT_USER_ONLY = $previousMode
     Remove-Item -LiteralPath $state -Recurse -Force
 }
+
+# A machine-readable result prevents a missing/null child exit code from
+# making the elevated CI wrapper report a false success. Reached only after
+# all checks and cleanup complete successfully.
+if ($ResultPath) {
+    $result = @{ passed = $true; sid = $identity.User.Value; administrator = $false; clients = 2; authorizedKeys = 2 }
+    [IO.File]::WriteAllText($ResultPath, ($result | ConvertTo-Json), $utf8)
+}
+Write-Output 'ALL_USER_MODE_TESTS_PASSED'

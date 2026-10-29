@@ -118,11 +118,12 @@ peer enrollment is part of this experiment.
 ## Recorded checks (2026-10-29)
 
 The first Windows workflow run (commit `b2e2251`) built native x64 Release
-binaries and passed independent concurrent clients, a forced PTY, unauthorized
-key rejection, explicit other-account rejection, and subsequent reconnection
-under a separate standard user on Windows Server 2022. That run used the
-standalone test configuration. The launcher SAM-name fix and generated-config
-coverage are being validated separately; update this record with their result.
+binaries successfully. Its integration wrapper incorrectly treated a null child
+exit code as success; the test actually stopped during key generation, so that
+run does **not** prove non-admin concurrency. The corrected harness retains
+process handles and requires a result JSON containing the expected standard-user
+SID plus a completion marker after all checks. Record the corrected run's
+result here once it completes.
 Portable API-double tests also exercise restricted/different token rejection,
 failed queries, token ownership and the default/SYSTEM paths; these are not
 substitutes for Windows runtime tests. The user's Windows installation and
