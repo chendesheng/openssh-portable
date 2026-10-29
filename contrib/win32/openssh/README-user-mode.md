@@ -32,7 +32,7 @@ this is not the SYSTEM service's separate low-privilege virtual account.
 ## Build from a Mac
 
 Use the **Windows current-user build** GitHub Actions workflow on your fork.
-It builds native x64 Release binaries on `windows-2022`; the existing portable
+It builds native x64 Release binaries on `windows-latest`; the existing portable
 CI's Cygwin builds are not equivalent. The workflow also parses the PowerShell
 scripts and runs the compiled server test as a separate, non-administrator local
 account. Download the artifact for the exact commit you intend to test.
@@ -164,3 +164,12 @@ Portable API-double tests also exercise restricted/different token rejection,
 failed queries, token ownership and the default/SYSTEM paths; these are not
 substitutes for Windows runtime tests. The user's Windows installation and
 phone/Mac clients have not been tested with these experimental binaries.
+
+## Runner comparison experiment
+
+The current workflow uses `windows-latest` to compare against the successfully
+tested `windows-2022` artifact recorded above. The server source, Release/x64
+configuration, packaging and standard-user integration tests are unchanged.
+Record the resolved runner image, CI result and win77 version-check result
+separately; a runner change alone does not establish the cause of an application
+control rejection. Keep the earlier artifact available for comparison.

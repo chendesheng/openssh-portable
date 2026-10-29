@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   build-and-test:
-    runs-on: windows-2022
+    runs-on: windows-latest
     timeout-minutes: 90
     defaults:
       run:
