@@ -56,6 +56,7 @@ jobs:
           $package = Join-Path $env:RUNNER_TEMP 'OpenSSH-Win64-UserMode'
           Start-OpenSSHPackage -Configuration Release -NativeHostArch x64 -DestinationPath $package -SkipSymbols
           Copy-Item contrib\win32\openssh\Start-UserSshd.ps1 $package
+          Copy-Item contrib\win32\openssh\Start-UserSshd.bat $package
           Copy-Item contrib\win32\openssh\Test-UserSshd.ps1 $package
           Copy-Item contrib\win32\openssh\README-user-mode.md $package
           $env:GITHUB_SHA | Set-Content (Join-Path $package 'SOURCE_COMMIT.txt')

@@ -91,6 +91,40 @@ The launcher restarts after server exit, not after every connection. No startup
 task or Windows service is installed. Back up the state directory privately to
 preserve the host key/fingerprint when restoring this Windows installation.
 
+### Start hidden after sign-in
+
+After initializing your configuration and authorized keys, keep
+`Start-UserSshd.bat` beside `sshd.exe` in the complete extracted package and
+double-click it. It uses the existing
+`%LOCALAPPDATA%\OpenSSH-User-2000\sshd_config` without changing configuration,
+authorized keys or host keys. The port and listen address come from that config.
+It validates the config, then starts a hidden PowerShell loop running `sshd -D`
+in current-user mode, restarting it two seconds after exit. No administrator
+rights are required.
+The initial batch/PowerShell window may briefly appear before it closes or hides.
+
+To use a different existing config, pass its path (quote paths containing spaces):
+
+```bat
+Start-UserSshd.bat "C:\Users\YourName\AppData\Local\OpenSSH-User-2222\sshd_config"
+```
+
+Press Win+R, enter `shell:startup`, and add a shortcut to the batch file to start
+it whenever you sign in. Keep the package in its original location; put only
+the shortcut in Startup. For custom arguments, use an absolute config path
+in the shortcut's Target. Start only one launcher for each port.
+
+Closing the batch window does not stop the hidden launcher. It runs while the
+screen is locked and ends when you sign out. To stop it manually, use Task
+Manager's Details tab, enable the Command line column, find the `powershell.exe`
+whose command contains `OPENSSH_USER_SSHD_EXE`, and choose End process tree.
+Stopping only `sshd.exe` causes the launcher to restart it.
+
+The batch file returning successfully means the hidden launcher was started;
+it does not confirm that the server is listening. For startup errors, stop any
+hidden launcher and run the existing config directly in a visible PowerShell
+window using the commands above to see the diagnostics.
+
 ## Verify
 
 Run `Test-UserSshd.ps1 -OpenSshDirectory <extracted-package>` from an ordinary
